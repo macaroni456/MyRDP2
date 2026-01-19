@@ -3,7 +3,7 @@ name: Awesome RDP
 on:
   workflow_dispatch:
 
-# 🔥 Automatically kills old stuck runs if you start a new one
+# 🔥 Automatically kills old stuck runs
 concurrency: 
   group: rdp-session
   cancel-in-progress: true
@@ -21,7 +21,7 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
           
-          # Aggressive Firewall opening (Just in case)
+          # Aggressive Firewall opening
           netsh advfirewall firewall delete rule name="RDP-Tailscale"
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
@@ -50,13 +50,13 @@ jobs:
           Invoke-WebRequest -Uri $tsUrl -OutFile "$env:TEMP\tailscale.msi"
           Start-Process msiexec.exe -ArgumentList "/i", "$env:TEMP\tailscale.msi", "/quiet", "/norestart" -Wait
 
-      # 4. Connect Tailscale (Fixed Hostname!) 🔗
+      # 4. Connect Tailscale (Back to Dynamic IP!) 🔗
       - name: Establish Tailscale Connection
         run: |
-          # Forces name to 'sayan-cloud-pc'
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=sayan-cloud-pc
+          # Uses a unique name each time to avoid conflict
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
           
-          # Wait for connection
+          # Wait for IP
           $tsIP = $null
           $retries = 0
           while (-not $tsIP -and $retries -lt 10) {
@@ -70,12 +70,11 @@ jobs:
       - name: Maintain Connection
         run: |
           Write-Host "`n=== 🚀 RDP READY ==="
-          Write-Host "Computer Name: sayan-cloud-pc"
-          Write-Host "Username:      RDP"
-          Write-Host "Password:      (Hidden - Use your Secret)"
+          Write-Host "IP Address:   $env:TAILSCALE_IP"
+          Write-Host "Username:     RDP"
+          Write-Host "Password:     (Hidden - Use your Secret)"
           Write-Host "====================`n"
           
-          # The loop you wanted!
           while ($true) {
               Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C (Cancel Run) in workflow to terminate"
               Start-Sleep -Seconds 300
