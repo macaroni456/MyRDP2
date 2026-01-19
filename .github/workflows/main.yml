@@ -14,17 +14,23 @@ jobs:
     timeout-minutes: 360
     
     steps:
-      # 1. Open Firewall & Registry 🔓
+# 1. Open Firewall & Registry (AGGRESSIVE MODE) 🔓
       - name: Configure Core RDP Settings
         run: |
+          # 1. Enable RDP in Registry
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
           
-          netsh advfirewall firewall delete rule name="RDP-Tailscale"
-          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+          # 2. DELETE conflicting firewall rules
+          netsh advfirewall firewall delete rule name="Remote Desktop - User Mode (TCP-In)"
+          
+          # 3. ADD a "Wide Open" rule for Port 3389 (Any Profile)
+          netsh advfirewall firewall add rule name="Force-RDP" dir=in action=allow protocol=TCP localport=3389 profile=any remoteip=any
+          
+          # 4. Restart Service to apply
           Restart-Service -Name TermService -Force
-
+          
+          Write-Host "🔥 Firewall blown wide open on Port 3389."
       # 2. Create User (Uses Secret RDP_PASSWORD) 🔒
       - name: Create RDP User with Secret Password
         run: |
