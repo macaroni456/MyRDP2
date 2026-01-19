@@ -46,9 +46,10 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i", "$env:TEMP\tailscale.msi", "/quiet", "/norestart" -Wait
 
       # 4. Connect Tailscale (Needs TAILSCALE_AUTH_KEY secret)
-      - name: Establish Tailscale Connection
+- name: Establish Tailscale Connection
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          # force the hostname to be 'sayan-cloud-pc'
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=sayan-cloud-pc
           
           # Wait for IP
           $tsIP = $null
@@ -60,6 +61,7 @@ jobs:
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
+      
       # 5. The Loop (Keeps it alive) 🔄
       - name: Maintain Connection
         run: |
