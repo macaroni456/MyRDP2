@@ -1,0 +1,75 @@
+name: Safe RDP
+
+on:
+  workflow_dispatch:
+
+jobs:
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    
+    steps:
+      # 1. Open Firewall & Registry for RDP (Same as before)
+      - name: Configure Core RDP Settings
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+          
+          netsh advfirewall firewall delete rule name="RDP-Tailscale"
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force
+
+      # 2. CREATE USER (Updated: Uses Secret, doesn't print it!) 🔒
+      - name: Create RDP User with Secret Password
+        run: |
+          # Pulls the password from your GitHub Secrets
+          $password = "${{ secrets.RDP_PASSWORD }}"
+          
+          if (-not $password) {
+            Write-Error "⚠️ RDP_PASSWORD secret is missing! Go to Settings -> Secrets and add it."
+            exit 1
+          }
+
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
+          
+          Write-Host "✅ User 'RDP' created successfully. Use the password you set in Secrets."
+
+      # 3. Install Tailscale (Same as before) 🦎
+      - name: Install Tailscale
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          Invoke-WebRequest -Uri $tsUrl -OutFile "$env:TEMP\tailscale.msi"
+          Start-Process msiexec.exe -ArgumentList "/i", "$env:TEMP\tailscale.msi", "/quiet", "/norestart" -Wait
+
+      # 4. Connect Tailscale (Needs TAILSCALE_AUTH_KEY secret)
+      - name: Establish Tailscale Connection
+        run: |
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          
+          # Wait for IP
+          $tsIP = $null
+          $retries = 0
+          while (-not $tsIP -and $retries -lt 10) {
+              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              Start-Sleep -Seconds 5
+              $retries++
+          }
+          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+
+      # 5. The Loop (Keeps it alive) 🔄
+      - name: Maintain Connection
+        run: |
+          Write-Host "`n=== 🚀 RDP READY ==="
+          Write-Host "IP Address: $env:TAILSCALE_IP"
+          Write-Host "Username:   RDP"
+          Write-Host "Password:   (Hidden - Use the one you set in Secrets)"
+          Write-Host "====================`n"
+          
+          while ($true) {
+              Write-Host "[$(Get-Date)] Still alive... Ctrl+C in GitHub Actions to stop."
+              Start-Sleep -Seconds 300
+          }
