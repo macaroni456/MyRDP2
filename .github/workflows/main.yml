@@ -1,0 +1,80 @@
+name: Safe RDP
+
+on:
+  workflow_dispatch:
+
+# 🔥 THIS IS THE FIX: Automatically kills old stuck runs!
+concurrency: 
+  group: rdp-session
+  cancel-in-progress: true
+
+jobs:
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    
+    steps:
+      # 1. Open Firewall & Registry 🔓
+      - name: Configure Core RDP Settings
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+          
+          netsh advfirewall firewall delete rule name="RDP-Tailscale"
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force
+
+      # 2. Create User (Uses Secret RDP_PASSWORD) 🔒
+      - name: Create RDP User with Secret Password
+        run: |
+          $password = "${{ secrets.RDP_PASSWORD }}"
+          
+          if (-not $password) {
+            Write-Error "⚠️ RDP_PASSWORD secret is missing! Go to Settings -> Secrets and add it."
+            exit 1
+          }
+
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
+          
+          Write-Host "✅ User 'RDP' created. Use your secret password to login."
+
+      # 3. Install Tailscale 🦎
+      - name: Install Tailscale
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          Invoke-WebRequest -Uri $tsUrl -OutFile "$env:TEMP\tailscale.msi"
+          Start-Process msiexec.exe -ArgumentList "/i", "$env:TEMP\tailscale.msi", "/quiet", "/norestart" -Wait
+
+      # 4. Connect Tailscale (Fixed Hostname!) 🔗
+      - name: Establish Tailscale Connection
+        run: |
+          # Forces name to 'sayan-cloud-pc' so you don't need to check IP
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=sayan-cloud-pc
+          
+          # Wait for connection
+          $tsIP = $null
+          $retries = 0
+          while (-not $tsIP -and $retries -lt 10) {
+              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              Start-Sleep -Seconds 5
+              $retries++
+          }
+          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+
+      # 5. Keep Alive Loop 🔄
+      - name: Maintain Connection
+        run: |
+          Write-Host "`n=== 🚀 RDP READY ==="
+          Write-Host "Computer Name: sayan-cloud-pc"
+          Write-Host "Username:      RDP"
+          Write-Host "Password:      (Hidden - Use your Secret)"
+          Write-Host "====================`n"
+          
+          while ($true) {
+              Write-Host "[$(Get-Date)] Running... (Auto-cancels if you start a new run)"
+              Start-Sleep -Seconds 300
+          }
