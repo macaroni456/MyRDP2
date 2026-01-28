@@ -1,4 +1,4 @@
-name: Rust RDP
+name: Awesome RDP
 on:
   workflow_dispatch:
 # 🔥 Automatically kills old stuck runs
@@ -115,8 +115,8 @@ jobs:
           echo "Downloading RustDesk version $RDLATEST."
           powershell Invoke-WebRequest "https://github.com/rustdesk/rustdesk/releases/download/$RDLATEST/rustdesk-$RDLATEST-x86_64.exe" -Outfile "rustdesk.exe"
           echo "Installing RustDesk..."
-          Start-Process .\rustdesk.exe --silent-install -Wait
-          Start-Sleep -Seconds 15
+          Start-Process -FilePath ".\rustdesk.exe" -ArgumentList "--silent-install" -Wait -NoNewWindow
+          Start-Sleep -Seconds 20
           
           # Apply Settings to fresh install
           Apply-SayanSettings -path "$env:ProgramFiles\RustDesk"
