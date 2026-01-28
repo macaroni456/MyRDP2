@@ -1,4 +1,4 @@
-name: Awesome RDP
+name: RST RDP
 on:
   workflow_dispatch:
 # 🔥 Automatically kills old stuck runs
