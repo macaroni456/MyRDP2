@@ -1,16 +1,13 @@
-name: Rowdy RDP
-
+name: Awesome RDP
 on:
   workflow_dispatch:
-
 # 🔥 Automatically kills old stuck runs
 concurrency: 
   group: rdp-session
   cancel-in-progress: true
-
 jobs:
   secure-rdp:
-    runs-on: windows-2022-16core
+    runs-on: windows-latest
     timeout-minutes: 480
     
     steps:
@@ -25,7 +22,6 @@ jobs:
           netsh advfirewall firewall delete rule name="RDP-Tailscale"
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
-
       # 2. Create User (Uses Secret RDP_PASSWORD) 🔒
       - name: Create RDP User with Secret Password
         run: |
@@ -35,21 +31,18 @@ jobs:
             Write-Error "⚠️ RDP_PASSWORD secret is missing! Go to Settings -> Secrets and add it."
             exit 1
           }
-
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
           New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
           
           Write-Host "✅ User 'RDP' created. Use your secret password to login."
-
       # 3. Install Tailscale 🦎
       - name: Install Tailscale
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           Invoke-WebRequest -Uri $tsUrl -OutFile "$env:TEMP\tailscale.msi"
           Start-Process msiexec.exe -ArgumentList "/i", "$env:TEMP\tailscale.msi", "/quiet", "/norestart" -Wait
-
       # 4. Connect Tailscale (Back to Dynamic IP!) 🔗
       - name: Establish Tailscale Connection
         run: |
@@ -65,17 +58,93 @@ jobs:
               $retries++
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-
-      # 5. Keep Alive Loop 🔄
+      
+      # 5. Setup RustDesk 🦀
+      - name: Install and Configure RustDesk
+        run: |
+          $ErrorActionPreference= 'silentlycontinue'
+          
+          # Hardcoded RustDesk credentials
+          $rustdesk_id_custom = "WinServerGIT"
+          $rustdesk_pw = "1234OneTwo"
+          
+          # YOUR TAILSCALE SETTINGS (Hardcoded for Sayan's Network)
+          $MY_ID_SERVER = "100.99.221.100"
+          $MY_KEY = "MhGj1W5nVR3PI+h45DfGAhR16bMAQElHg7HCWymvD0w="
+          
+          # Checks for the latest version of RustDesk
+          $url = 'https://www.github.com//rustdesk/rustdesk/releases/latest'
+          $request = [System.Net.WebRequest]::Create($url)
+          $response = $request.GetResponse()
+          $realTagUrl = $response.ResponseUri.OriginalString
+          $RDLATEST = $realTagUrl.split('/')[-1].Trim('v')
+          echo "RustDesk $RDLATEST is the latest version."
+          
+          # Checks the version of RustDesk installed.
+          $rdver = ((Get-ItemProperty  "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\RustDesk\").Version)
+          
+          # Function to apply settings (Used in both install and update scenarios)
+          function Apply-SayanSettings {
+              param($path)
+              cd $path
+              echo "Applying Tailscale configurations..."
+              .\rustdesk.exe --set-config id-server $MY_ID_SERVER
+              .\rustdesk.exe --set-config relay-server $MY_ID_SERVER
+              .\rustdesk.exe --set-config key $MY_KEY
+              .\rustdesk.exe --set-id $rustdesk_id_custom
+              .\rustdesk.exe --password $rustdesk_pw
+          }
+          
+          # Skips to inputting the configuration if already installed.
+          if($rdver -eq "$RDLATEST") {
+              echo "RustDesk $rdver is already installed."
+              Apply-SayanSettings -path "$env:ProgramFiles\RustDesk"
+              echo "All done! Tailscale routing is active. 🚀"
+              echo "..............................................."
+              echo "RustDesk ID: $rustdesk_id_custom"
+              echo "Password: $rustdesk_pw"
+              echo "..............................................."
+              echo "RUSTDESK_ID=$rustdesk_id_custom" >> $env:GITHUB_ENV
+              echo "RUSTDESK_PW=$rustdesk_pw" >> $env:GITHUB_ENV
+              exit
+          }
+          
+          if (!(Test-Path C:\Temp)) { New-Item -ItemType Directory -Force -Path C:\Temp > null }
+          
+          cd C:\Temp
+          echo "Downloading RustDesk version $RDLATEST."
+          powershell Invoke-WebRequest "https://github.com/rustdesk/rustdesk/releases/download/$RDLATEST/rustdesk-$RDLATEST-x86_64.exe" -Outfile "rustdesk.exe"
+          echo "Installing RustDesk..."
+          Start-Process .\rustdesk.exe --silent-install -Wait
+          Start-Sleep -Seconds 15
+          
+          # Apply Settings to fresh install
+          Apply-SayanSettings -path "$env:ProgramFiles\RustDesk"
+          
+          echo "All done! Tailscale routing is active. 🚀"
+          echo "..............................................."
+          echo "RustDesk ID: $rustdesk_id_custom"
+          echo "Password: $rustdesk_pw"
+          echo "..............................................."
+          echo "RUSTDESK_ID=$rustdesk_id_custom" >> $env:GITHUB_ENV
+          echo "RUSTDESK_PW=$rustdesk_pw" >> $env:GITHUB_ENV
+      
+      # 6. Keep Alive Loop 🔄
       - name: Maintain Connection
         run: |
-          Write-Host "`n=== 🚀 RDP READY ==="
-          Write-Host "IP Address:   $env:TAILSCALE_IP"
-          Write-Host "Username:     RDP"
-          Write-Host "Password:     (Hidden - Use your Secret)"
-          Write-Host "====================`n"
+          Write-Host "`n=== 🚀 REMOTE ACCESS READY ==="
+          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
+          Write-Host ""
+          Write-Host "RDP Access:"
+          Write-Host "  Username:   RDP"
+          Write-Host "  Password:   (Hidden - Use your Secret)"
+          Write-Host ""
+          Write-Host "RustDesk Access:"
+          Write-Host "  ID:         $env:RUSTDESK_ID"
+          Write-Host "  Password:   $env:RUSTDESK_PW"
+          Write-Host "==============================`n"
           
           while ($true) {
-              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C (Cancel Run) in workflow to terminate"
+              Write-Host "[$(Get-Date)] Session Active - Use Ctrl+C (Cancel Run) in workflow to terminate"
               Start-Sleep -Seconds 300
           }
